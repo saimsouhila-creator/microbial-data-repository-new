@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Microbial Relative Abundance Data Viewer</title>
+<style>
+:root{--bg:#f5f7fa;--card:#fff;--text:#17212b;--muted:#617080;--line:#dbe2e9;--accent:#1769aa}
+*{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--text)}
+header{background:linear-gradient(135deg,#0b4f7c,#1769aa);color:#fff;padding:42px 20px}
+.wrap{max-width:1200px;margin:auto;padding:0 20px}h1{margin:0 0 8px;font-size:clamp(1.8rem,4vw,2.8rem)}header p{margin:0;max-width:850px}
+main{padding:30px 0}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:22px;box-shadow:0 6px 22px rgba(20,35,50,.06)}
+.controls{display:flex;gap:12px;flex-wrap:wrap;align-items:end}.field{display:flex;flex-direction:column;gap:6px}
+label{font-weight:700;font-size:.9rem}select,input,button{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#fff}
+button{background:var(--accent);color:#fff;border-color:var(--accent);cursor:pointer;font-weight:700}
+button.secondary{background:#fff;color:var(--accent)}button:hover{filter:brightness(.96)}
+.stats{display:flex;gap:20px;flex-wrap:wrap;color:var(--muted);margin-top:14px}.stats strong{color:var(--text)}
+.table-wrap{overflow:auto;max-height:65vh;border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;min-width:850px;width:100%;background:#fff}
+th,td{padding:9px 11px;border-bottom:1px solid #e8edf2;text-align:left;white-space:nowrap;font-size:.9rem}
+th{position:sticky;top:0;background:#eef4f9;z-index:2;cursor:pointer}
+tbody tr:hover{background:#f7fbfe}.taxon{font-weight:700}
+.note{background:#eef6fc;border-left:4px solid var(--accent);padding:13px 15px;border-radius:8px;color:#34495e}
+footer{padding:28px 0;color:var(--muted);font-size:.9rem}
+.status{color:var(--muted);font-size:.9rem}.hidden{display:none}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+<h1>Microbial Relative Abundance Data Viewer</h1>
+<p>Interactive browser for the study's relative-abundance tables at Phylum, Family and Genus levels.</p>
+</div></header>
+
+<main><div class="wrap">
+<div class="card">
+<h2>Explore the data</h2>
+<div class="controls">
+<div class="field"><label for="level">Taxonomic level</label>
+<select id="level">
+<option value="phylum">Phylum</option>
+<option value="family">Family</option>
+<option value="genus">Genus</option>
+</select></div>
+<div class="field"><label for="search">Search taxon or sample</label>
+<input id="search" type="search" placeholder="e.g. Pseudomonas">
+</div>
+<button id="download">Download filtered CSV</button>
+<button class="secondary" id="reset">Reset search</button>
+</div>
+<div class="stats">
+<span>Taxa shown: <strong id="rows">—</strong></span>
+<span>Columns: <strong id="cols">—</strong></span>
+<span class="status" id="status">Loading…</span>
+</div>
+</div>
+
+<div class="card">
+<div class="note">
+<strong>How to use:</strong> choose a taxonomic level, type a taxon or sample name in the search box, and scroll horizontally to inspect the sample values. Click a column heading to sort.
+</div>
+</div>
+
+<div class="card">
+<div class="table-wrap"><table id="dataTable"><thead></thead><tbody></tbody></table></div>
+</div>
+</div></main>
+
+<footer><div class="wrap">
+Data files: relativeAbundancePhylumLevel.csv, relativeAbundanceFamilyLevel.csv, relativeAbundanceGenusLevel.csv.
+</div></footer>
+
+<script>
+const files={
+phylum:"data/relativeAbundancePhylumLevel.csv",
+family:"data/relativeAbundanceFamilyLevel.csv",
+genus:"data/relativeAbundanceGenusLevel.csv"
+};
+let raw=[], filtered=[], sortCol=-1, asc=true;
+
+function parseCSV(text){
+ const rows=[]; let row=[], cell="", quote=false;
+ for(let i=0;i<text.length;i++){
+   const c=text[i], n=text[i+1];
+   if(c==='"'){ if(quote && n==='"'){cell+='"';i++} else quote=!quote; }
+   else if(c===',' && !quote){row.push(cell);cell="";}
+   else if((c==='\n'||c==='\r') && !quote){
+     if(c==='\r'&&n==='\n')i++;
+     row.push(cell);cell="";
+     if(row.some(x=>x!=="")) rows.push(row);
+     row=[];
+   } else cell+=c;
+ }
+ if(cell!==""||row.length){row.push(cell);rows.push(row);}
+ const headers=rows.shift();
+ return rows.map(r=>Object.fromEntries(headers.map((h,i)=>[h,r[i]??""])));
+}
+function csvEscape(v){v=String(v??"");return /[",\n]/.test(v)?'"'+v.replaceAll('"','""')+'"':v}
+async function load(){
+ const level=document.getElementById("level").value;
+ document.getElementById("status").textContent="Loading…";
+ const text=await fetch(files[level]).then(r=>r.text());
+ raw=parseCSV(text); filtered=raw; sortCol=-1; render();
+ document.getElementById("status").textContent="Ready";
+}
+function render(){
+ const table=document.getElementById("dataTable"), thead=table.querySelector("thead"), tbody=table.querySelector("tbody");
+ thead.innerHTML="";tbody.innerHTML="";
+ if(!raw.length){return}
+ const headers=Object.keys(raw[0]);
+ const tr=document.createElement("tr");
+ headers.forEach((h,i)=>{const th=document.createElement("th");th.textContent=h;th.title="Click to sort";
+ th.onclick=()=>{if(sortCol===i)asc=!asc;else{sortCol=i;asc=true}
+ filtered.sort((a,b)=>String(a[h]).localeCompare(String(b[h]),undefined,{numeric:true}));
+ if(!asc)filtered.reverse();render()};tr.appendChild(th)});
+ thead.appendChild(tr);
+ filtered.forEach(obj=>{const tr=document.createElement("tr");
+ headers.forEach((h,i)=>{const td=document.createElement("td");td.textContent=obj[h];if(i===0)td.className="taxon";tr.appendChild(td)});tbody.appendChild(tr)});
+ document.getElementById("rows").textContent=filtered.length;
+ document.getElementById("cols").textContent=headers.length;
+}
+function search(){
+ const q=document.getElementById("search").value.trim().toLowerCase();
+ if(!q){filtered=[...raw]} else {
+   filtered=raw.filter(r=>Object.values(r).some(v=>String(v).toLowerCase().includes(q)));
+ }
+ render();
+}
+document.getElementById("level").onchange=load;
+document.getElementById("search").oninput=search;
+document.getElementById("reset").onclick=()=>{document.getElementById("search").value="";search()};
+document.getElementById("download").onclick=()=>{
+ if(!filtered.length)return;
+ const headers=Object.keys(filtered[0]);
+ const csv=[headers.map(csvEscape).join(","),...filtered.map(r=>headers.map(h=>csvEscape(r[h])).join(","))].join("\n");
+ const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+ a.download="filtered_relative_abundance.csv";a.click();URL.revokeObjectURL(a.href);
+};
+load();
+</script>
+</body>
+</html>
